@@ -190,6 +190,26 @@ static bool is_func_return(const struct cs_insn *insn)
     return false;
 }
 
+static bool is_pop_lr(const struct cs_insn *insn)
+{
+    const struct cs_arm *arminsn = &insn->detail->arm;
+
+    if (insn->id == ARM_INS_POP)
+    {
+        int i;
+
+        assert(arminsn->op_count > 0);
+        for (i = 0; i < arminsn->op_count; i++)
+        {
+            if (arminsn->operands[i].type == ARM_OP_REG
+             && arminsn->operands[i].reg == ARM_REG_LR) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 static bool is_pool_load(const struct cs_insn *insn)
 {
     const struct cs_arm *arminsn = &insn->detail->arm;
@@ -584,7 +604,8 @@ static void analyze(void)
                 #define MAX_CALL 1000
                 uint32_t processedCallsInChunk[MAX_CALL] = {0}; // TODO: reimplement this
                 int pcici = 0;
-
+                bool pops_lr = false;
+                
                 if (labelAddr <= addr && labelAddr != 0)
                     break;
                 count = cs_disasm(sCapstone, gInputFileBuffer + addr - ROM_LOAD_ADDR, labelAddr == 0 ? 0x1000 : labelAddr - addr, addr, 0, &insn);
@@ -624,6 +645,11 @@ static void analyze(void)
                         uint32_t target;
                         //uint32_t currAddr = addr;
 
+                        // tail calls do not make sense if there is a branch between pop lr and b
+                        if (pops_lr && insn[i].detail->arm.cc != ARM_CC_AL) {
+                            pops_lr = false;
+                        }
+                        
                         // handle bx pc
                         if (insn[i].id == ARM_INS_BX
                             && insn[i].detail->arm.op_count == 1
@@ -656,6 +682,14 @@ static void analyze(void)
                                 label_p->branchType = BRANCH_TYPE_BL;
                                 label_p->isFunc = true;
                             }
+                            break;
+                        }
+
+                        // handle 'pop {..., lr}; b func_...' tail call
+                        if (pops_lr && insn[i].id == ARM_INS_B && insn[i].detail->arm.cc == ARM_CC_AL) {
+                            target = get_branch_target(&insn[i]);
+                            assert(target != 0);
+                            disasm_add_label(target, type, NULL);
                             break;
                         }
 
@@ -768,6 +802,12 @@ static void analyze(void)
                         {
                             word = insn[i].detail->arm.operands[2].imm + (addr - insn[i].size) + 8;
                             goto check_handwritten_indirect_jump;
+                        }
+
+                        // if after a 'pop {..., lr}' instruction there comes an unconditional branch
+                        // then it's very likely to be a tail call
+                        if (is_pop_lr(&insn[i])) {
+                            pops_lr = true;
                         }
 
                         if (is_pool_load(&insn[i]))
