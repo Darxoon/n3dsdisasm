@@ -804,6 +804,13 @@ static void analyze(void)
                             goto check_handwritten_indirect_jump;
                         }
 
+                        // labels that start with a push are very likely to be functions
+                        // this heuristic might be a bit agressive though
+                        if (i <= 3 && insn[i].id == ARM_INS_PUSH) {
+                            gLabels[li].isFunc = true;
+                            gLabels[li].branchType = BRANCH_TYPE_BL;
+                        }
+
                         // if after a 'pop {..., lr}' instruction there comes an unconditional branch
                         // then it's very likely to be a tail call
                         if (is_pop_lr(&insn[i])) {
