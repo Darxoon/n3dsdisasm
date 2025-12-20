@@ -3,6 +3,7 @@
 enum BranchType
 {
     BRANCH_TYPE_UNKNOWN,
+    BRANCH_TYPE_PROBABLY_BL,
     BRANCH_TYPE_B,
     BRANCH_TYPE_BL,
 };
