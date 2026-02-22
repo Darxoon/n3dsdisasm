@@ -3,6 +3,7 @@ CAPSTONE_DIR := capstone-4.0.2
 CAPSTONE_LIB := $(CAPSTONE_DIR)/libcapstone.a
 
 DEBUG ?= 0
+CAPSTONE_DEBUG ?= 0
 
 CC := gcc
 CFLAGS := -isystem $(CAPSTONE_DIR)/include -Wall -Wextra -Wpedantic
@@ -15,17 +16,23 @@ PROGRAM := n3dsdisasm
 SOURCES := main.c disasm.c
 LIBS := $(CAPSTONE_LIB)
 
+ifeq ($(CAPSTONE_DEBUG),1)
+CAPSTONE_CFLAGS := -O1 -g -fcanon-prefix-map -ffile-prefix-map="$(shell pwd)"=. -fdebug-prefix-map="$(shell pwd)"=.
+endif
+
 # Compile the program
 $(PROGRAM): $(SOURCES) $(CAPSTONE_LIB)
 	$(CC) $(CFLAGS) $^ -o $@
 
 # Build libcapstone
 $(CAPSTONE_LIB): $(CAPSTONE_DIR)
-	make -C $(CAPSTONE_DIR) CAPSTONE_STATIC=yes CAPSTONE_SHARED=no CAPSTONE_ARCHS="arm"
+	make -C $(CAPSTONE_DIR) CAPSTONE_STATIC=yes CAPSTONE_SHARED=no CAPSTONE_ARCHS="arm" CAPSTONE_CFLAGS='$(CAPSTONE_CFLAGS)'
 
 # Extract the archive
 $(CAPSTONE_DIR): $(CAPSTONE_ARCHIVE)
 	tar -xvf $(CAPSTONE_ARCHIVE)
+# 	Fix passing cflags to capstone
+	git apply capstone_build.patch
 
 clean:
 	$(RM) $(PROGRAM) $(PROGRAM).exe

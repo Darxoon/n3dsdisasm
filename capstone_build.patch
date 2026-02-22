@@ -1,0 +1,15 @@
+diff --git a/capstone-4.0.2/Makefile b/capstone-4.0.2/Makefile
+index 8367757..ce554f0 100644
+--- a/capstone-4.0.2/Makefile
++++ b/capstone-4.0.2/Makefile	
+@@ -34,6 +34,10 @@ RANLIB = $(CROSS)ranlib
+ STRIP = $(CROSS)strip
+ endif
+ 
++ifneq (,$(CAPSTONE_CFLAGS))
++CFLAGS := $(CAPSTONE_CFLAGS)
++endif
++
+ ifneq (,$(findstring yes,$(CAPSTONE_DIET)))
+ CFLAGS ?= -Os
+ CFLAGS += -DCAPSTONE_DIET
