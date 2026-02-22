@@ -158,12 +158,20 @@ static int get_unprocessed_label_index(void)
 
 static bool is_branch(const struct cs_insn *insn)
 {
+    cs_arm_op* operand;
+    
     switch (insn->id)
     {
     case ARM_INS_B:
     case ARM_INS_BX:
     case ARM_INS_BL:
         return true;
+    
+    case ARM_INS_BLX:
+        // blx is often used with a register, in which case it's impossible
+        // to statically analyze, so don't treat it as a branch
+        operand = &insn->detail->arm.operands[0];
+        return operand->type == ARM_OP_IMM;
     }
     return false;
 }
@@ -712,11 +720,18 @@ static void analyze(void)
                         //if (!(target >= gLabels[li].addr && target <= currAddr))
                         if (1)
                         {
-                            int lbl = disasm_add_label(target, type, NULL);
+                            // switch intstruction set on blx
+                            int target_type = type;
+                            if (insn[i].id == ARM_INS_BLX) {
+                                target_type = type == LABEL_ARM_CODE ? LABEL_THUMB_CODE : LABEL_ARM_CODE;
+                            }
+                            
+                            // fprintf(stderr, "LabelC %#010x %d i=%d\n", currentLabelAddr, type, i);
+                            int lbl = disasm_add_label(target, target_type, NULL);
 
                             if (!gLabels[lbl].isFunc) // do nothing if it's 100% a func (from func ptr, or instant mode exchange)
                             {
-                                if (insn[i].id == ARM_INS_BL)
+                                if (insn[i].id == ARM_INS_BL || insn[i].id == ARM_INS_BLX)
                                 {
                                     const struct Label *next;
 
@@ -758,7 +773,9 @@ static void analyze(void)
                         }
 
                         // unconditional jump and not a function call
-                        if (insn[i].detail->arm.cc == ARM_CC_AL && insn[i].id != ARM_INS_BL)
+                        if (insn[i].detail->arm.cc == ARM_CC_AL
+                         && insn[i].id != ARM_INS_BL
+                         && insn[i].id != ARM_INS_BLX)
                             break;
                     }
                     else
