@@ -28,7 +28,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         
-      - name: Make sure dependencies exist
+      - name: Print MinGW dependency versions
         run: |
           make --version
           gcc --version
+      
+      - name: Build windows release
+        run: make
+        
+      - name: Upload windows binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: n3dsdisasm.exe
+          path: n3dsdisasm.exe
