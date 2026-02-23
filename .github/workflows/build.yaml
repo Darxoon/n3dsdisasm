@@ -17,4 +17,18 @@ jobs:
         with:
           name: n3dsdisasm
           path: n3dsdisasm
+  
+  build-windows:
+    runs-on: windows-latest
+    
+    defaults:
+      run:
+        shell: bash
+    
+    steps:
+      - uses: actions/checkout@v4
         
+      - name: Make sure dependencies exist
+        run: |
+          make --version
+          gcc --version
