@@ -1,0 +1,20 @@
+name: Build n3dsdisasm
+
+on:
+  - push
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Build linux release
+        run: make
+        
+      - name: Upload linux binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: n3dsdisasm
+          path: n3dsdisasm
+        
