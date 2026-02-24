@@ -29,6 +29,7 @@ struct Label
     uint32_t size;
     bool processed;
     bool isFunc; // 100% sure it's a function, which cannot be changed to BRANCH_TYPE_B. 
+    bool isData;
     char *name;
     struct DepNode *deps[MAX_DEPS]; // TODO: reimplement this
     int depCount;
@@ -58,7 +59,9 @@ int disasm_add_label(uint32_t addr, uint8_t type, char *name)
     {
         if (gLabels[i].addr == addr)
         {
-            gLabels[i].type = type;
+            if (!gLabels[i].isData)
+                gLabels[i].type = type;
+            
             return i;
         }
     }
@@ -73,6 +76,7 @@ int disasm_add_label(uint32_t addr, uint8_t type, char *name)
         if (gLabels == NULL)
             fatal_error("failed to alloc space for labels. ");
     }
+
     gLabels[i].addr = addr;
     gLabels[i].type = type;
     if (type == LABEL_ARM_CODE || type == LABEL_THUMB_CODE)
@@ -83,6 +87,7 @@ int disasm_add_label(uint32_t addr, uint8_t type, char *name)
     gLabels[i].processed = false;
     gLabels[i].name = name;
     gLabels[i].isFunc = false;
+    gLabels[i].isData = false;
     for (j = 0; j < MAX_DEPS; ++j)
         gLabels[i].deps[j] = NULL;
     gLabels[i].depCount = 0;
@@ -103,6 +108,11 @@ int disasm_set_branch_type(uint32_t addr, uint32_t type, bool farJump)
 void disasm_force_func(int idx)
 {
     gLabels[idx].isFunc = true;
+}
+
+void disasm_force_data(int idx)
+{
+    gLabels[idx].isData = true;
 }
 
 // Utility Functions
@@ -523,6 +533,9 @@ static void renew_or_add_new_func_label(int type, uint32_t word)
 
         if (label_p != NULL)
         {
+            if (label_p->isData)
+                return;
+            
             // maybe it has been processed as a non-function label
             label_p->processed = false;
             label_p->branchType = BRANCH_TYPE_BL;
@@ -706,7 +719,9 @@ static void analyze(void)
                             int lbl = disasm_add_label(target, type, NULL);
                             
                             // prevent the branched to label from being turned back to a regular label
-                            gLabels[lbl].branchType = BRANCH_TYPE_BL;
+                            if (!gLabels[lbl].isData)
+                                gLabels[lbl].branchType = BRANCH_TYPE_BL;
+                            
                             break;
                         }
 
@@ -729,7 +744,8 @@ static void analyze(void)
                             // fprintf(stderr, "LabelC %#010x %d i=%d\n", currentLabelAddr, type, i);
                             int lbl = disasm_add_label(target, target_type, NULL);
 
-                            if (!gLabels[lbl].isFunc) // do nothing if it's 100% a func (from func ptr, or instant mode exchange)
+                            // do nothing if it's 100% a func (from func ptr, or instant mode exchange) or data
+                            if (!gLabels[lbl].isFunc && !gLabels[lbl].isData)
                             {
                                 if (insn[i].id == ARM_INS_BL || insn[i].id == ARM_INS_BLX)
                                 {
@@ -831,7 +847,7 @@ static void analyze(void)
 
                         // labels that start with a push are very likely to be functions
                         // this heuristic might be a bit agressive though
-                        if (i <= 3 && insn[i].id == ARM_INS_PUSH) {
+                        if (i <= 3 && insn[i].id == ARM_INS_PUSH && !gLabels[li].isData) {
                             gLabels[li].isFunc = true;
                             gLabels[li].branchType = BRANCH_TYPE_BL;
                         }

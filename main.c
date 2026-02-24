@@ -267,7 +267,10 @@ static void read_config(const char *fname)
 
             if (sscanf(tokens[1], "%i", &addr) == 1)
             {
-                disasm_add_label(addr, LABEL_DATA, NULL);
+                int idx = disasm_add_label(addr, LABEL_DATA, NULL);
+                
+                if (strlen(tokens[3]) != 0)
+                    disasm_force_data(idx);
             }
             else
             {
