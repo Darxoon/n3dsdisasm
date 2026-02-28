@@ -1081,9 +1081,18 @@ static void print_insn(const cs_insn *insn, uint32_t addr, int mode)
                   && insn->detail->arm.operands[1].reg == ARM_REG_PC
                   && insn->detail->arm.operands[2].type == ARM_OP_IMM)
             {
-                uint32_t word = insn->detail->arm.operands[2].imm + addr + 8;
+                int32_t immediate = insn->detail->arm.operands[2].imm;
+                if (insn->detail->arm.operands[3].type == ARM_OP_IMM) {
+                    int64_t immediateWide = immediate;
+                    immediateWide = ((immediateWide << 32) | immediateWide) >> insn->detail->arm.operands[3].imm;
+                    immediate = (int32_t) immediateWide;
+                }
+                
+                uint32_t word = immediate + addr + 8;
                 const struct Label *label_p;
 
+                const char* regName = cs_reg_name(sCapstone, insn->detail->arm.operands[0].reg);
+                
                 if (word & 3 && word > ROM_LOAD_ADDR && word - ROM_LOAD_ADDR - 1 < gInputFileBufferSize) // possibly thumb function
                 {
                     if (label_p = lookup_label(word & ~1), label_p != NULL)
@@ -1091,9 +1100,9 @@ static void print_insn(const cs_insn *insn, uint32_t addr, int mode)
                         if (is_func(label_p) && label_p->type == LABEL_THUMB_CODE)
                         {
                             if (label_p->name != NULL && label_p->branchType != BRANCH_TYPE_B)
-                                printf("\tadd %s, pc, #0x%x @ =%s\n", cs_reg_name(sCapstone, insn->detail->arm.operands[0].reg), insn->detail->arm.operands[2].imm, label_p->name);
+                                printf("\tadd %s, pc, #0x%x @ =%s\n", regName, immediate, label_p->name);
                             else
-                                printf("\tadd %s, pc, #0x%x @ =func_%08x\n", cs_reg_name(sCapstone, insn->detail->arm.operands[0].reg), insn->detail->arm.operands[2].imm, word & ~1);
+                                printf("\tadd %s, pc, #0x%x @ =func_%08x\n", regName, immediate, word & ~1);
                             return;
                         }
                     }
@@ -1104,15 +1113,15 @@ static void print_insn(const cs_insn *insn, uint32_t addr, int mode)
                     if (label_p->type != LABEL_THUMB_CODE)
                     {
                         if (label_p->name != NULL && label_p->branchType != BRANCH_TYPE_B)
-                            printf("\tadd %s, pc, #0x%x @ =%s\n", cs_reg_name(sCapstone, insn->detail->arm.operands[0].reg), insn->detail->arm.operands[2].imm, label_p->name);
+                            printf("\tadd %s, pc, #0x%x @ =%s\n", regName, immediate, label_p->name);
                         else if (is_func(label_p))
-                            printf("\tadd %s, pc, #0x%x @ =func_%08x\n", cs_reg_name(sCapstone, insn->detail->arm.operands[0].reg), insn->detail->arm.operands[2].imm, word);
+                            printf("\tadd %s, pc, #0x%x @ =func_%08x\n", regName, immediate, word);
                         else
-                            printf("\tadd %s, pc, #0x%x @ =_%08x\n", cs_reg_name(sCapstone, insn->detail->arm.operands[0].reg), insn->detail->arm.operands[2].imm, word);
+                            printf("\tadd %s, pc, #0x%x @ =_%08x\n", regName, immediate, word);
                         return;
                     }
                 }
-                printf("\tadd %s, pc, #0x%x @ =0x%08x\n", cs_reg_name(sCapstone, insn->detail->arm.operands[0].reg), insn->detail->arm.operands[2].imm, word);
+                printf("\tadd %s, pc, #0x%x @ =0x%08x\n", regName, immediate, word);
             }
             else
                 printf("\t%s %s\n", insn->mnemonic, insn->op_str);
