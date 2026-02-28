@@ -1,6 +1,7 @@
 #include <assert.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -1040,20 +1041,8 @@ static void print_insn(const cs_insn *insn, uint32_t addr, int mode)
         }
         else
         {
-            // fix "add rX, sp, rX"
-            if (insn->id == ARM_INS_ADD
-             && insn->detail->arm.operands[0].type == ARM_OP_REG
-             && insn->detail->arm.operands[1].type == ARM_OP_REG
-             && insn->detail->arm.operands[1].reg == ARM_REG_SP
-             && insn->detail->arm.operands[2].type == ARM_OP_REG)
-            {
-                printf("\t%s %s, %s\n",
-                  insn->mnemonic,
-                  cs_reg_name(sCapstone, insn->detail->arm.operands[0].reg),
-                  cs_reg_name(sCapstone, insn->detail->arm.operands[1].reg));
-            }
             // fix thumb adr
-            else if (insn->id == ARM_INS_ADR && mode == LABEL_THUMB_CODE)
+            if (insn->id == ARM_INS_ADR && mode == LABEL_THUMB_CODE)
             {
                 uint32_t word = (insn->detail->arm.operands[1].imm + addr + 4) & ~3;
                 const struct Label *label_p = lookup_label(word);
@@ -1081,17 +1070,29 @@ static void print_insn(const cs_insn *insn, uint32_t addr, int mode)
                   && insn->detail->arm.operands[1].reg == ARM_REG_PC
                   && insn->detail->arm.operands[2].type == ARM_OP_IMM)
             {
+                const struct Label *label_p;
+                
                 int32_t immediate = insn->detail->arm.operands[2].imm;
+                uint32_t word;
+                
                 if (insn->detail->arm.operands[3].type == ARM_OP_IMM) {
                     int64_t immediateWide = immediate;
                     immediateWide = ((immediateWide << 32) | immediateWide) >> insn->detail->arm.operands[3].imm;
-                    immediate = (int32_t) immediateWide;
+                    
+                    word = ((int32_t) immediateWide) + addr + 8;
+                } else {
+                    word = immediate + addr + 8;
                 }
-                
-                uint32_t word = immediate + addr + 8;
-                const struct Label *label_p;
 
                 const char* regName = cs_reg_name(sCapstone, insn->detail->arm.operands[0].reg);
+                
+                char immediateString[0x60];
+                if (insn->detail->arm.operands[3].type == ARM_OP_IMM) {
+                    snprintf(immediateString, sizeof(immediateString), "#0x%x, #0x%x",
+                            immediate, insn->detail->arm.operands[3].imm);
+                } else {
+                    snprintf(immediateString, sizeof(immediateString), "#0x%x", immediate);
+                }
                 
                 if (word & 3 && word > ROM_LOAD_ADDR && word - ROM_LOAD_ADDR - 1 < gInputFileBufferSize) // possibly thumb function
                 {
@@ -1100,9 +1101,9 @@ static void print_insn(const cs_insn *insn, uint32_t addr, int mode)
                         if (is_func(label_p) && label_p->type == LABEL_THUMB_CODE)
                         {
                             if (label_p->name != NULL && label_p->branchType != BRANCH_TYPE_B)
-                                printf("\tadd %s, pc, #0x%x @ =%s\n", regName, immediate, label_p->name);
+                                printf("\t%s %s, pc, %s @ =%s\n", insn->mnemonic, regName, immediateString, label_p->name);
                             else
-                                printf("\tadd %s, pc, #0x%x @ =func_%08x\n", regName, immediate, word & ~1);
+                                printf("\t%s %s, pc, %s @ =func_%08x\n", insn->mnemonic, regName, immediateString, word & ~1);
                             return;
                         }
                     }
@@ -1113,15 +1114,15 @@ static void print_insn(const cs_insn *insn, uint32_t addr, int mode)
                     if (label_p->type != LABEL_THUMB_CODE)
                     {
                         if (label_p->name != NULL && label_p->branchType != BRANCH_TYPE_B)
-                            printf("\tadd %s, pc, #0x%x @ =%s\n", regName, immediate, label_p->name);
+                            printf("\t%s %s, pc, %s @ =%s\n", insn->mnemonic, regName, immediateString, label_p->name);
                         else if (is_func(label_p))
-                            printf("\tadd %s, pc, #0x%x @ =func_%08x\n", regName, immediate, word);
+                            printf("\t%s %s, pc, %s @ =func_%08x\n", insn->mnemonic, regName, immediateString, word);
                         else
-                            printf("\tadd %s, pc, #0x%x @ =_%08x\n", regName, immediate, word);
+                            printf("\t%s %s, pc, %s @ =_%08x\n", insn->mnemonic, regName, immediateString, word);
                         return;
                     }
                 }
-                printf("\tadd %s, pc, #0x%x @ =0x%08x\n", regName, immediate, word);
+                printf("\t%s %s, pc, %s @ =0x%08x\n", insn->mnemonic, regName, immediateString, word);
             }
             else
                 printf("\t%s %s\n", insn->mnemonic, insn->op_str);
