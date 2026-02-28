@@ -1,5 +1,4 @@
-CAPSTONE_ARCHIVE := capstone-4.0.2.tar.gz
-CAPSTONE_DIR := capstone-4.0.2
+CAPSTONE_DIR := capstone
 
 $(info $(OS))
 ifeq ($(OS), Windows_NT)
@@ -35,17 +34,8 @@ $(PROGRAM): $(SOURCES) $(CAPSTONE_LIB)
 $(CAPSTONE_LIB): $(CAPSTONE_DIR)
 	make -C $(CAPSTONE_DIR) CAPSTONE_STATIC=yes CAPSTONE_SHARED=no CAPSTONE_ARCHS="arm" CAPSTONE_BUILD_CORE_ONLY=yes CAPSTONE_CFLAGS='$(CAPSTONE_CFLAGS)'
 
-# Extract the archive
-$(CAPSTONE_DIR): $(CAPSTONE_ARCHIVE)
-	tar -xvf $(CAPSTONE_ARCHIVE)
-# 	FIXME: this does not work on windows
-ifeq ($(CAPSTONE_DEBUG),1)
-# 	Fix passing cflags to capstone
-	git apply capstone_build.patch
-endif
-
 clean:
 	$(RM) $(PROGRAM) $(PROGRAM).exe
 
 distclean: clean
-	rm -rf $(CAPSTONE_DIR)
+	make -C $(CAPSTONE_DIR) clean
