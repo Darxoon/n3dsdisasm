@@ -956,7 +956,7 @@ static void print_gap(uint32_t addr, uint32_t nextaddr)
     if ((addr & 3) == 2) {
         uint16_t next_short = hword_at(addr);
         if (next_short == 0) {
-            fputs("\t.align 2, 0\n", stdout);
+            fputs("\t.align 4, 0\n", stdout);
             addr += 2;
         } else if (next_short == 0x46C0) {
             fputs("\tnop\n", stdout);
