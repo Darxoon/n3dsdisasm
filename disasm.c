@@ -53,7 +53,12 @@ int disasm_add_label(uint32_t addr, uint8_t type, char *name)
 {
     int i, j;
 
-    //printf("adding label 0x%08x\n", addr);
+    if (addr < 0x100000 || addr > 0x3d6bb4) {
+        fprintf(stderr, "error: invalid code address %#010x\n", addr);
+        return -1;
+    }
+    
+    // printf("adding label 0x%08x\n", addr);
     // Search for label
     //assert(addr >= ROM_LOAD_ADDR && addr < ROM_LOAD_ADDR + gInputFileBufferSize);
     for (i = 0; i < gLabelsCount; i++)
@@ -744,6 +749,11 @@ static void analyze(void)
                             
                             // fprintf(stderr, "LabelC %#010x %d i=%d\n", currentLabelAddr, type, i);
                             int lbl = disasm_add_label(target, target_type, NULL);
+                            
+                            if (lbl == -1) {
+                                fatal_error("failed parsing branch '%s %s' at %#010lx (%s)",
+                                    insn[i].mnemonic, insn[i].op_str, insn[i].address, type == LABEL_ARM_CODE ? "ARM" : "Thumb");
+                            }
 
                             // do nothing if it's 100% a func (from func ptr, or instant mode exchange) or data
                             if (!gLabels[lbl].isFunc && !gLabels[lbl].isData)
@@ -1212,7 +1222,8 @@ static void print_disassembly(void)
 
                     if (addr & unalignedMask)
                     {
-                        fprintf(stderr, "error: function at 0x%08x is not aligned\n", addr);
+                        fprintf(stderr, "error: function at 0x%08x (%s) is not aligned\n",
+                            addr, gLabels[i].type == LABEL_ARM_CODE ? "ARM" : "Thumb");
                         return;
                     }
                     if (gLabels[i].name != NULL)
