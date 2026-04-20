@@ -12,7 +12,7 @@ DEBUG ?= 0
 CAPSTONE_DEBUG ?= 0
 
 CC := gcc
-CFLAGS := -isystem $(CAPSTONE_DIR)/include -Wall -Wextra -Wpedantic
+CFLAGS := -isystem $(CAPSTONE_DIR)/include -Wall -Wextra -Wpedantic -Wno-missing-field-initializers
 ifeq ($(DEBUG),1)
 CFLAGS += -O0 -g -fsanitize=address
 else

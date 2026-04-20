@@ -36,6 +36,7 @@ struct Label
     int depCount;
     bool inactive;
     bool isFarJump;
+    struct LabelOrigin* origin;
 };
 
 struct Label *gLabels = NULL;
@@ -47,15 +48,77 @@ const bool gOptionShowAddrComments = false;
 const int gOptionDataColumnWidth = 16;
 
 static struct Label *lookup_label(uint32_t addr);
-static void renew_or_add_new_func_label(int type, uint32_t word);
+static void renew_or_add_new_func_label(int type, uint32_t word, struct LabelOrigin* origin);
 
-int disasm_add_label(uint32_t addr, uint8_t type, char *name)
+static void create_label_origin(struct LabelOrigin* origin, enum LabelOriginType type, int labelIndex, const struct cs_insn* insn) {
+    origin->type = type;
+    origin->callerLabel = labelIndex;
+    origin->callerAddr = insn->address;
+    snprintf(origin->callerInstruction, sizeof(origin->callerInstruction), "%s %s", insn->mnemonic, insn->op_str);
+}
+
+static void print_backtrace(struct LabelOrigin* origin) {
+    if (origin == NULL) {
+        fputs("\thit from <unknown>\n", stderr);
+        return;
+    }
+    
+    fprintf(stderr, "\thit from '%s' at %#010x (%s)\n",
+        origin->callerInstruction, origin->callerAddr,
+        gLabels[origin->callerLabel].type == LABEL_ARM_CODE ? "ARM" : "Thumb");
+    
+    uint32_t addr = gLabels[origin->callerLabel].addr;
+    origin = gLabels[origin->callerLabel].origin;
+    
+    const char* refType = "<unknown>";
+    while (origin) {
+        switch (origin->type) {
+            case LABEL_ORIGIN_ENTRY:
+                refType = "entry";
+                goto loop_end;
+            case LABEL_ORIGIN_JUMP_TABLE:
+                refType = "jump table";
+                goto loop_end;
+            
+            case LABEL_ORIGIN_BRANCH:
+                refType = "branch";
+                break;
+            case LABEL_ORIGIN_FUNC_CALL:
+                refType = "func call";
+                break;
+            case LABEL_ORIGIN_TAIL_CALL:
+                refType = "tail call";
+                break;
+            case LABEL_ORIGIN_FUNC_RETURN:
+                refType = "func return";
+                break;
+            case LABEL_ORIGIN_POOL_LOAD:
+                refType = "pool load";
+                break;
+        }
+        
+        struct Label* label = &gLabels[origin->callerLabel];
+        
+        fprintf(stderr, "  at label %#010x hit from %s '%s' at %#010x (%s)\n",
+            addr, refType, origin->callerInstruction, origin->callerAddr,
+            label->type == LABEL_ARM_CODE ? "ARM" : "Thumb");
+        
+        addr = label->addr;
+        origin = label->origin;
+    }
+    
+loop_end:
+    fprintf(stderr, "  at label %#010x hit from %s <unknown>\n", addr, refType);
+}
+
+int disasm_add_label(uint32_t addr, uint8_t type, char *name, struct LabelOrigin* origin)
 {
     int i, j;
 
     if (addr < 0x100000 || addr > 0x3d6bb4) {
         fprintf(stderr, "error: invalid code address %#010x\n", addr);
-        return -1;
+        print_backtrace(origin);
+        exit(1);
     }
     
     // printf("adding label 0x%08x\n", addr);
@@ -99,6 +162,13 @@ int disasm_add_label(uint32_t addr, uint8_t type, char *name)
     gLabels[i].depCount = 0;
     gLabels[i].inactive = false;
     gLabels[i].isFarJump = false;
+    if (origin) {
+        struct LabelOrigin* originClone = malloc(sizeof(struct LabelOrigin));
+        *originClone = *origin;
+        gLabels[i].origin = originClone;
+    } else {
+        gLabels[i].origin = NULL;
+    }
     return i;
 }
 
@@ -338,7 +408,8 @@ static void jump_table_state_machine(const struct cs_insn *insn, uint32_t addr)
         uint32_t target;
         uint32_t firstTarget = -1u;
 
-        disasm_add_label(jumpTableBegin, LABEL_JUMP_TABLE, NULL);
+        disasm_add_label(jumpTableBegin, LABEL_JUMP_TABLE, NULL,
+            &(struct LabelOrigin){ LABEL_ORIGIN_JUMP_TABLE });
         sJumpTableState = 0;
         // add code labels from jump table
         addr = jumpTableBegin;
@@ -351,7 +422,8 @@ static void jump_table_state_machine(const struct cs_insn *insn, uint32_t addr)
                 break;
             if (target < firstTarget && target > jumpTableBegin)
                 firstTarget = target;
-            label = disasm_add_label(target, LABEL_THUMB_CODE, NULL);
+            label = disasm_add_label(target, LABEL_THUMB_CODE, NULL,
+                &(struct LabelOrigin){ LABEL_ORIGIN_JUMP_TABLE });
             gLabels[label].branchType = BRANCH_TYPE_B;
             addr += 4;
         }
@@ -375,7 +447,8 @@ int jump_table_create_labels(uint32_t start, int count)
         if (target - ROM_LOAD_ADDR >= gInputFileBufferSize
             || target < end)
             return 1;
-        idx = disasm_add_label(target, LABEL_THUMB_CODE, NULL);
+        idx = disasm_add_label(target, LABEL_THUMB_CODE, NULL,
+            &(struct LabelOrigin){ LABEL_ORIGIN_JUMP_TABLE });
         gLabels[idx].branchType = BRANCH_TYPE_B;
     }
     return 0;
@@ -492,7 +565,8 @@ static bool set_inactive_labels_and_reprocess_prev_labels(void)
 }
 
 // handle mov lr, pc; bx rX
-static bool is_gs_func_call(const cs_insn *insn, uint32_t addr, int type) // should be called only when there's at least one function following
+// should be called only when there's at least one function following
+static bool is_gs_func_call(int labelIndex, const cs_insn *insn, uint32_t addr, int type)
 {
     if (insn[1].id != ARM_INS_BX)
         return false;
@@ -505,9 +579,13 @@ static bool is_gs_func_call(const cs_insn *insn, uint32_t addr, int type) // sho
         && insn[0].detail->arm.operands[1].reg == ARM_REG_PC
         && insn[0].detail->arm.operands[1].shift.type == ARM_SFT_INVALID)
     {
-        if (type == LABEL_THUMB_CODE)
+        if (type == LABEL_THUMB_CODE) {
+            struct LabelOrigin origin;
+            create_label_origin(&origin, LABEL_ORIGIN_FUNC_RETURN, labelIndex, insn);
+            
             // TODO: this is unsafe. Possibly a thumb subroutine will return with something like mov pc, lr
-            renew_or_add_new_func_label(LABEL_ARM_CODE, (addr + 2) & ~2); // the bx insn can be used for both thumb and arm
+            renew_or_add_new_func_label(LABEL_ARM_CODE, (addr + 2) & ~2, &origin); // the bx insn can be used for both thumb and arm
+        }
         return true;
     }
     if (insn[0].id == ARM_INS_ADD
@@ -524,14 +602,17 @@ static bool is_gs_func_call(const cs_insn *insn, uint32_t addr, int type) // sho
             return true;
         if (!lookup_label(addr + insn[0].detail->arm.operands[2].imm))
         {
-            int idx = disasm_add_label(addr + insn[0].detail->arm.operands[2].imm, type, NULL);
+            struct LabelOrigin origin;
+            create_label_origin(&origin, LABEL_ORIGIN_FUNC_RETURN, labelIndex, insn);
+            
+            int idx = disasm_add_label(addr + insn[0].detail->arm.operands[2].imm, type, NULL, &origin);
             gLabels[idx].branchType = BRANCH_TYPE_B;
         }
     }
     return false;
 }
 
-static void renew_or_add_new_func_label(int type, uint32_t word)
+static void renew_or_add_new_func_label(int type, uint32_t word, struct LabelOrigin* origin)
 {
     if (word >= ROM_LOAD_ADDR && word - ROM_LOAD_ADDR < gInputFileBufferSize - 4)
     {
@@ -550,7 +631,7 @@ static void renew_or_add_new_func_label(int type, uint32_t word)
         else
         {
             // implicitly set to BRANCH_TYPE_BL
-            int idx = disasm_add_label(word & ~1, type, NULL);
+            int idx = disasm_add_label(word & ~1, type, NULL, origin);
             gLabels[idx].isFunc = true;
         }
     }
@@ -689,7 +770,10 @@ static void analyze(void)
                             && insn[i].detail->arm.operands[0].type == ARM_OP_REG
                             && insn[i].detail->arm.operands[0].reg == ARM_REG_PC)
                         {
-                            renew_or_add_new_func_label(LABEL_ARM_CODE, 4 + (addr&~3));
+                            struct LabelOrigin origin;
+                            create_label_origin(&origin, LABEL_ORIGIN_BRANCH, li, &insn[i]);
+                            
+                            renew_or_add_new_func_label(LABEL_ARM_CODE, 4 + (addr&~3), &origin);
                             addr += insn[i].size;
                             break;
                         }
@@ -701,7 +785,7 @@ static void analyze(void)
                         {
                             struct Label *label_p;
 
-                            if (i && is_gs_func_call(&insn[i-1], addr, type)) continue;
+                            if (i && is_gs_func_call(li, &insn[i-1], addr, type)) continue;
 
                             // It's possible that handwritten code with different mode follows. 
                             // However, this only causes problem when the address following is
@@ -722,7 +806,11 @@ static void analyze(void)
                         if (pops_lr && insn[i].id == ARM_INS_B && insn[i].detail->arm.cc == ARM_CC_AL) {
                             target = get_branch_target(&insn[i]);
                             assert(target != 0);
-                            int lbl = disasm_add_label(target, type, NULL);
+                            
+                            struct LabelOrigin origin;
+                            create_label_origin(&origin, LABEL_ORIGIN_TAIL_CALL, li, &insn[i]);
+                            
+                            int lbl = disasm_add_label(target, type, NULL, &origin);
                             
                             // prevent the branched to label from being turned back to a regular label
                             if (!gLabels[lbl].isData)
@@ -748,12 +836,9 @@ static void analyze(void)
                             }
                             
                             // fprintf(stderr, "LabelC %#010x %d i=%d\n", currentLabelAddr, type, i);
-                            int lbl = disasm_add_label(target, target_type, NULL);
-                            
-                            if (lbl == -1) {
-                                fatal_error("failed parsing branch '%s %s' at %#010lx (%s)",
-                                    insn[i].mnemonic, insn[i].op_str, insn[i].address, type == LABEL_ARM_CODE ? "ARM" : "Thumb");
-                            }
+                            struct LabelOrigin origin;
+                            create_label_origin(&origin, LABEL_ORIGIN_FUNC_CALL, li, &insn[i]);
+                            int lbl = disasm_add_label(target, target_type, NULL, &origin);
 
                             // do nothing if it's 100% a func (from func ptr, or instant mode exchange) or data
                             if (!gLabels[lbl].isFunc && !gLabels[lbl].isData)
@@ -897,7 +982,11 @@ static void analyze(void)
                             }
                             if (flag) continue; // simply ignore this pool
                             // otherwise we add another dep linked list to the pool label
-                            idx = disasm_add_label(poolAddr, LABEL_POOL, NULL);
+                            
+                            struct LabelOrigin origin;
+                            create_label_origin(&origin, LABEL_ORIGIN_POOL_LOAD, li, &insn[i]);
+                            
+                            idx = disasm_add_label(poolAddr, LABEL_POOL, NULL, &origin);
                             gLabels[idx].inactive = false;
                             if (gLabels[idx].depCount == MAX_DEPS)
                             {
@@ -929,8 +1018,12 @@ static void analyze(void)
                                 if (insn[i + 1].id == ARM_INS_BX)
                                 {
                                     if (insn[i + 1].detail->arm.operands[0].type == ARM_OP_REG
-                                     && insn[i].detail->arm.operands[0].reg == insn[i + 1].detail->arm.operands[0].reg)
-                                        renew_or_add_new_func_label(word & 1 ? LABEL_THUMB_CODE : LABEL_ARM_CODE, word);
+                                     && insn[i].detail->arm.operands[0].reg == insn[i + 1].detail->arm.operands[0].reg) {
+                                        struct LabelOrigin origin;
+                                        create_label_origin(&origin, LABEL_ORIGIN_BRANCH, li, &insn[i]);
+                                        
+                                        renew_or_add_new_func_label(word & 1 ? LABEL_THUMB_CODE : LABEL_ARM_CODE, word, &origin);
+                                    }
                                 }
                                 else if (insn[i + 1].id == ARM_INS_MOV
                                       && insn[i + 1].detail->arm.operands[0].type == ARM_OP_REG
@@ -938,7 +1031,9 @@ static void analyze(void)
                                       && insn[i + 1].detail->arm.operands[1].type == ARM_OP_REG
                                       && insn[i].detail->arm.operands[0].reg == insn[i + 1].detail->arm.operands[1].reg)
                                 {
-                                    renew_or_add_new_func_label(type, word);
+                                    struct LabelOrigin origin;
+                                    create_label_origin(&origin, LABEL_ORIGIN_BRANCH, li, &insn[i]);
+                                    renew_or_add_new_func_label(type, word, &origin);
                                 }
                                 
                             }
@@ -1224,6 +1319,10 @@ static void print_disassembly(void)
                     {
                         fprintf(stderr, "error: function at 0x%08x (%s) is not aligned\n",
                             addr, gLabels[i].type == LABEL_ARM_CODE ? "ARM" : "Thumb");
+                        
+                        struct LabelOrigin origin;
+                        create_label_origin(&origin, LABEL_ORIGIN_FUNC_CALL, i, insn);
+                        print_backtrace(&origin);
                         return;
                     }
                     if (gLabels[i].name != NULL)
@@ -1394,7 +1493,7 @@ void disasm_disassemble(void)
     if (!gStandaloneFlag)
     {
         // entry point
-        disasm_add_label(ROM_LOAD_ADDR, LABEL_ARM_CODE, NULL);
+        disasm_add_label(ROM_LOAD_ADDR, LABEL_ARM_CODE, NULL, &(struct LabelOrigin){ LABEL_ORIGIN_ENTRY });
     }
 
     if (!gLabelsCount)

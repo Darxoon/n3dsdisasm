@@ -139,7 +139,7 @@ static void read_config(const char *fname)
             {
                 if (strlen(tokens[2]) != 0)
                     name = dup_string(tokens[2]);
-                idx = disasm_add_label(addr, LABEL_ARM_CODE, name);
+                idx = disasm_add_label(addr, LABEL_ARM_CODE, name, &(struct LabelOrigin){ LABEL_ORIGIN_ENTRY });
                 if (strlen(tokens[3]) != 0)
                     disasm_force_func(idx);
             }
@@ -157,7 +157,7 @@ static void read_config(const char *fname)
             {
                 if (strlen(tokens[2]) != 0)
                     name = dup_string(tokens[2]);
-                idx = disasm_add_label(addr, LABEL_THUMB_CODE, name);
+                idx = disasm_add_label(addr, LABEL_THUMB_CODE, name, &(struct LabelOrigin){ LABEL_ORIGIN_ENTRY });
                 if (strlen(tokens[3]) != 0)
                     disasm_force_func(idx);
             }
@@ -174,7 +174,7 @@ static void read_config(const char *fname)
             {
                 if (strlen(tokens[2]) != 0)
                     name = dup_string(tokens[2]);
-                disasm_add_label(addr, LABEL_THUMB_CODE, name);
+                disasm_add_label(addr, LABEL_THUMB_CODE, name, &(struct LabelOrigin){ LABEL_ORIGIN_ENTRY });
                 disasm_set_branch_type(addr, BRANCH_TYPE_B, false);
             }
             else
@@ -190,7 +190,7 @@ static void read_config(const char *fname)
             {
                 if (strlen(tokens[2]) != 0)
                     name = dup_string(tokens[2]);
-                disasm_add_label(addr, LABEL_ARM_CODE, name);
+                disasm_add_label(addr, LABEL_ARM_CODE, name, &(struct LabelOrigin){ LABEL_ORIGIN_ENTRY });
                 disasm_set_branch_type(addr, BRANCH_TYPE_B, false);
             }
             else
@@ -206,7 +206,7 @@ static void read_config(const char *fname)
             {
                 if (strlen(tokens[2]) != 0)
                     name = dup_string(tokens[2]);
-                disasm_add_label(addr, LABEL_THUMB_CODE, name);
+                disasm_add_label(addr, LABEL_THUMB_CODE, name, &(struct LabelOrigin){ LABEL_ORIGIN_ENTRY });
                 disasm_set_branch_type(addr, BRANCH_TYPE_B, true);
             }
             else
@@ -222,7 +222,7 @@ static void read_config(const char *fname)
             {
                 if (strlen(tokens[2]) != 0)
                     name = dup_string(tokens[2]);
-                disasm_add_label(addr, LABEL_ARM_CODE, name);
+                disasm_add_label(addr, LABEL_ARM_CODE, name, &(struct LabelOrigin){ LABEL_ORIGIN_ENTRY });
                 disasm_set_branch_type(addr, BRANCH_TYPE_B, true);
             }
             else
@@ -238,7 +238,7 @@ static void read_config(const char *fname)
                 && sscanf(tokens[2], "%i", &count) == 1)
             {
                 for (i = 0; i < count; ++i)
-                    disasm_add_label(addr + 4*i, LABEL_POOL, NULL);
+                    disasm_add_label(addr + 4*i, LABEL_POOL, NULL, &(struct LabelOrigin){ LABEL_ORIGIN_ENTRY });
             }
             else
             {
@@ -252,7 +252,7 @@ static void read_config(const char *fname)
             if (sscanf(tokens[1], "%i", &addr) == 1
                 && sscanf(tokens[2], "%i", &count) == 1)
             {
-                disasm_add_label(addr, LABEL_JUMP_TABLE, NULL);
+                disasm_add_label(addr, LABEL_JUMP_TABLE, NULL, &(struct LabelOrigin){ LABEL_ORIGIN_ENTRY });
                 if (jump_table_create_labels(addr, count))
                     fatal_error("%s: invalid params on line %i\n", fname, lineNum);
             }
@@ -267,7 +267,7 @@ static void read_config(const char *fname)
 
             if (sscanf(tokens[1], "%i", &addr) == 1)
             {
-                int idx = disasm_add_label(addr, LABEL_DATA, NULL);
+                int idx = disasm_add_label(addr, LABEL_DATA, NULL, &(struct LabelOrigin){ LABEL_ORIGIN_ENTRY });
                 
                 if (strlen(tokens[3]) != 0)
                     disasm_force_data(idx);
